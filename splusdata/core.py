@@ -1,689 +1,225 @@
-import requests
-import time
-import json
-import io 
+import adss
+import getpass
 
-from getpass import getpass
+from PIL import Image
+from astropy.io import fits
+import io
 
-# TODO: DEPRECATE and remove imports on old API
-
-## Error handling
-class AuthenticationError(Exception):
+class SplusdataError(Exception):
+    """Custom exception for S-PLUS data errors."""
     pass
 
-class SplusError(Exception):
-    pass
-
-
-# ----------------------------
-""" FIXME: Put in another folder later"""
 
 def open_image(image_bytes):
+    """Open image from bytes and return PIL Image."""
     from PIL import Image
     im = Image.open(io.BytesIO(image_bytes))
     return im
 
 def save_image(image_bytes, filename):
+    """Save image bytes to file."""
     im = open_image(image_bytes)
     im.save(filename)
     
-def open_fits(fits_bytes):
-    from astropy.io import fits
-    return fits.open(io.BytesIO(fits_bytes))
 
-def save_fits(fits, filename):
-    from astropy.io.fits import CompImageHDU
-    sufix = ""
-    for ext in fits:
-        # check if extension is compressed
-        if isinstance(ext, CompImageHDU):
-            if not ".fz" in filename:
-                sufix = ".fz"
-    
-    fits.writeto(filename + sufix, overwrite=True)
-    
-# ----------------------------
-
-
+# field frame
 class Core:
-    """
-    A class for interacting with the S-PLUS API.
-
-    Parameters
-    ----------
-    username : str, optional
-        The username for the splus.cloud account. If not provided, the user will be prompted to enter it.
-    password : str, optional
-        The password for the splus.cloud account. If not provided, the user will be prompted to enter it.
-
-    Attributes
-    ----------
-    SERVER_URL : str
-        The base URL for the S-PLUS API server.
-    session : requests.Session
-        The session object used for making requests to the S-PLUS API.
-    token : str
-        The authentication token for the S-PLUS API.
-    headers : dict
-        The headers to be included in requests to the S-PLUS API.
-    collab : bool
-        Whether the user has access to collaboration data.
-
-    Methods
-    -------
-    authenticate(username=None, password=None)
-        Authenticates the user with the S-PLUS API.
-    _make_request(method, url, data=None, json_=None, params=None)
-        Makes a request to the S-PLUS API.
-    field_frame(field, band, filename=None, _data_release=None)
-        Downloads a FITS file for a given field and band.
-    field_info(field)
-        Gets information about a given field.
-    info_mar(data)
-        Gets information about a given data file.
-    fetch_mar_file(file, filename=None)
-        Downloads a data file.
-    """
-
-    def __init__(self, username=None, password=None, SERVER_IP = f"https://splus.cloud", auto_renew = False):
-        """
-        Initializes a new instance of the Core class.
-
-        Parameters
-        ----------
-        username   : str, optional
-            The username for the splus.cloud account. If not provided, the user will be prompted to enter it.
-        password   : str, optional
-            The password for the splus.cloud account. If not provided, the user will be prompted to enter it.
-        SERVER_IP  : str, optional
-            Server IP 
-        auto_renew : bool, optional
-            Automatically try to renew splus token once is expired instead of loggin in again. (not so safe)
-        
-        """
-        self.SERVER_IP = SERVER_IP
-        self.SERVER_URL = f"{self.SERVER_IP}/api"
-        
-        self.auto_renew = auto_renew
-        
-        self.session = requests.Session()
-        
-        self.username = username
-        self.password = None
-        if self.auto_renew:
-            self.password = password
-            
-        self.authenticate(self.username, password)
-        self.refresh_rate = 5
-
-
-    def authenticate(self, username=None, password=None):
-        """
-        Authenticates the user with the S-PLUS API.
-
-        Parameters
-        ----------
-        username : str, optional
-            The username for the splus.cloud account. If not provided, the user will be prompted to enter it.
-        password : str, optional
-            The password for the splus.cloud account. If not provided, the user will be prompted to enter it.
-
-        Raises
-        ------
-        AuthenticationError
-            If authentication fails.
-        """
+    """Core interface for interacting with S-PLUS data via ADSSClient."""
+    
+    def __init__(self, username=None, password=None, SERVER_IP=f"https://splus.cloud", auto_renew=False):
+        """Initialize Core with optional credentials and server IP."""
         if not username:
             username = input("splus.cloud username: ")
         if not password:    
             password = getpass("splus.cloud password: ")
             if self.auto_renew:
                 self.password = password
-
-        data = {'username': username, 'password': password}
-        response = self.session.post(f"{self.SERVER_URL}/auth/login", data=data)
-
-        if response.status_code != 200:
-            raise AuthenticationError("Authentication failed")
-
-        user_data = json.loads(response.content)
-        self.token = user_data['token']
-        self.headers = {'Authorization': 'Token ' + self.token}
-
-        response = self.session.post(f"{self.SERVER_URL}/auth/collab", headers=self.headers)
-        collab = json.loads(response.content)
-
-        self.collab = collab.get('collab') == 'yes'
         
-    def _make_request(self, method, url, data=None, json_=None, params=None):
-        """
-        Makes a request to the S-PLUS API.
-
-        Parameters
-        ----------
-        method : str
-            The HTTP method to use for the request.
-        url : str
-            The URL to make the request to.
-        data : dict, optional
-            The data to include in the request body.
-        json_ : dict, optional
-            The JSON data to include in the request body.
-        params : dict, optional
-            The query parameters to include in the request.
-
-        Returns
-        -------
-        requests.Response
-            The response from the S-PLUS API.
-
-        Raises
-        ------
-        SplusError
-            If the response contains an error.
-        """
-        response = self.session.request(method, url, data=data, json=json_, params=params, headers=self.headers)
+        self.client = adss.ADSSClient(
+            SERVER_IP,
+            username=username,
+            password=password
+        )
+        self.collections = []
         
-        if self.auto_renew and response.status_code == 401:
-            print("Renewing splus session token.")
-            self.authenticate(self.username, self.password)
-            response = self.session.request(method, url, data=data, json=json_, params=params, stream=True, headers=self.headers)
+    def _load_collections(self):
+        """Load image collections from server."""
+        collections = self.client.get_image_collections()
+        self.collections = collections
 
-        resjson = None
-        try:
-            resjson = response.json()
-        except:
-            pass
+    def get_collection_id_by_pattern(self, pattern):
+        """Return first collection whose name contains given pattern."""
+        self._load_collections()
+        for col in self.collections:
+            if pattern in col['name']:
+                return col
+        raise SplusdataError("Collection not found")
+    
+    def field_frame(self, field, band, weight=False, outfile=None, _data_release="dr4"):
+        """Retrieve a full field frame FITS image for a given field and band."""
+        collection = self.get_collection_id_by_pattern(_data_release)
+        collection_id = collection['id']
         
-        if resjson:
-            if 'error' in resjson:
-                raise SplusError(resjson['error'])
-            else:
-                response.raise_for_status()  # Raise an exception for HTTP errors
+        candidates = self.client.list_image_files(collection_id, object_name=field, filter_name=band)
+
+        if len(candidates) == 0 and ("-" in field or "_" in field):
+            field = field.replace("-", "_") if "-" in field else field.replace("_", "-")
+            candidates = self.client.list_image_files(collection_id, object_name=field)
+        if len(candidates) == 0:
+            raise SplusdataError(f"Field {field} not found in band {band}")
+        
+        patterns = collection['patterns']
+
+        final_candidate = None
+        f_candidates = []
+        
+        if weight:
+            pattern = "weight"
+        for c in candidates:
+            if pattern in c['filename']:
+                f_candidates.append(c)
+
+        if len(f_candidates) == 0:
+            final_candidate = candidates[0]
+        elif len(f_candidates) == 1:
+            final_candidate = f_candidates[0]
         else:
-            response.raise_for_status()  # Raise an exception for HTTP errors
+            fz_candidates = [c for c in f_candidates if c['file_type'] == "fz"]
+            final_candidate = fz_candidates[0] if fz_candidates else f_candidates
+
+        image_bytes = self.client.download_image(
+            final_candidate['id'],
+            output_path=outfile
+        )
         
-        return response
-    
-    def field_frame(self, field, band, weight = False, filename=None, _data_release=None):
-        """
-        Downloads a FITS file for a given field and band.
-
-        Parameters
-        ----------
-        field : str
-            The name of the field to download the FITS file for.
-        band : str
-            The name of the band to download the FITS file for.
-        filename : str, optional
-            The name of the file to save the FITS data to.
-        _data_release : str, optional
-            The data release to download the FITS file for.
-
-        Returns
-        -------
-        astropy.io.fits.HDUList
-            The FITS data for the requested field and band.
-        """
-        data = {
-            "fieldname": field,
-            "band": band,
-            "weight": weight,
-            "dr": _data_release
-        }
-        res = self._make_request('POST', f"{self.SERVER_URL}/download_frame", json_=data)
+        return fits.open(io.BytesIO(image_bytes))
+                                   
+    def stamp(self, ra, dec, size, band, weight=False, field_name=None, size_unit="pixels", outfile=None, _data_release="dr4"):
+        """Retrieve a FITS cutout (stamp) at given coordinates or field name."""
+        collection = self.get_collection_id_by_pattern(_data_release)
+        collection_id = collection['id']
         
-        frame = open_fits(res.content)
-        if filename:
-            save_fits(frame, filename=filename)
-        return frame
-    
-    
-    # ----------------------------
-    # TODO: Decide if its going to stay in this class
-    def field_info(self, field):
-        """
-        Gets information about a given field.
-
-        Parameters
-        ----------
-        field : str
-            The name of the field to get information about.
-
-        Returns
-        -------
-        dict
-            The information about the requested field.
-        """
-        # 'api/get_field_info_mar/<str:fieldname>'
-        res = self._make_request('POST', f"{self.SERVER_URL}/get_field_info_mar/{field}")
-        return res.json()
-
-
-    ### TODO: INTERNAL PERMITED FUNCTIONS ###
-    def info_mar(self, data):
-        """
-        Gets information about a given data file.
-
-        Parameters
-        ----------
-        data : dict
-            The data to use for the request.
-
-        Returns
-        -------
-        dict
-            The information about the requested data file.
-
-        Raises
-        ------
-        SplusError
-            If the response contains an error.
-        """
-        assert isinstance(data, dict), "data must be a dict"
-        
-        endpoints = ["finaltiles", "individualfile", "superflat", "biasblock", "flatblock"]
-        if data['endpoint'] not in endpoints:
-            raise SplusError("Endpoint not in {endpoints}}")
-            
-        res = self._make_request('POST', f"{self.SERVER_URL}/get_info_mar", json_=data)
-        return res.json()
-
-    def fetch_mar_file(self, file, filename=None):
-        """
-        Downloads a data file.
-
-        Parameters
-        ----------
-        file : str
-            The name of the file to download.
-        filename : str, optional
-            The name of the file to save the downloaded data to.
-
-        Returns
-        -------
-        bytes or astropy.io.fits.HDUList
-            The downloaded data.
-
-        Raises
-        ------
-        SplusError
-            If the downloaded file is not recognized or does not exist.
-        """
-        # get_file_mar
-        
-        res = self._make_request('POST', f"{self.SERVER_URL}/get_file_mar", json_={"filename": file})
-        
-        if filename:
-            print("Saving file to", filename)
-            with open(filename, 'wb') as f:
-                f.write(res.content)
-        
-        try:
-            if '.png' in file:
-                return open_image(res.content)
-            elif '.fits' in file:
-                return open_fits(res.content)
-        except:
-            raise SplusError("File not recognized, may be corrupted or not exist")
-        
-        return res.content
-    
-    def stamp(self, ra, dec, size, band, weight = False, option = 1, filename=None, _data_release=None):
-        """
-        Downloads a FITS file for a given field and band.
-
-        Parameters
-        ----------
-        ra : float
-            The RA of the center of the stamp.
-        dec : float
-            The DEC of the center of the stamp.
-        size : float
-            The size of the stamp in arcseconds.
-        band : str
-            The name of the band to download the FITS file for.
-        weight : bool, optional
-            Whether to download the weight map for the stamp.
-        option : int, optional
-            The option to use for the match 1 -> first match, 2 -> second match.
-        filename : str, optional
-            The name of the file to save the FITS data to.
-        _data_release : str, optional
-            The data release to download the FITS file for.
-
-        Returns
-        -------
-        astropy.io.fits.HDUList
-            The FITS data for the requested field and band.
-        """
-        data = {
-            "ra": ra,
-            "dec": dec,
-            "band": band,
-            "option": str(option),
-            "size": size,
-            "weight": weight,
-            "dr": _data_release
-        }
-        res = self._make_request('POST', f"{self.SERVER_URL}/download_stamp", json_=data)
-        
-        frame = open_fits(res.content)
-        if filename:
-            save_fits(frame, filename=filename)
-        return frame
-    
-    def lupton_rgb(self, ra, dec, size, R="I", G="R", B="G", Q=8, stretch=3, option=1, filename=None, _data_release=None):
-        """
-        Downloads a lupton image.
-
-        Parameters
-        ----------
-        ra : float
-            The RA of the center of the stamp.
-        dec : float
-            The DEC of the center of the stamp.
-        size : float
-            The size of the stamp in arcseconds.
-        R : str
-            The name of the band to use for the red channel.
-        G : str
-            The name of the band to use for the green channel.
-        B : str
-            The name of the band to use for the blue channel.
-        Q : int, optional
-            Q of image, same of make_lupton_rgb from astropy. Defaults to 8.
-        stretch : int, optional
-            Stretch of image, same of make_lupton_rgb from astropy. Defaults to 3.
-        option : int, optional
-            The option to use for the match 1 -> first match, 2 -> second match.
-        filename : str, optional
-            The name of the file to save the FITS data to.
-        _data_release : str, optional
-            The data release to download the FITS file for.
-
-        Returns
-        -------
-        astropy.io.fits.HDUList
-            The FITS data for the requested field and band.
-        """
-        data = {
-            "ra": ra,
-            "dec": dec,
-            "size": size,
-            "R": R,
-            "G": G,
-            "B": B,
-            "Q": Q,
-            "stretch": stretch,
-            "option": str(option),
-            "dr": _data_release
-        }
-        res = self._make_request('POST', f"{self.SERVER_URL}/lupton_image", json_=data)
-        
-        
-        frame = open_image(res.content)
-        if filename:
-            save_image(res.content, filename=filename)
-        return frame
-    
-    def trilogy_image(self, ra, dec, size, R="R,I,F861,Z", G="G,F515,F660", B="U,F378,F395,F410,F430", noiselum=0.15, satpercent=0.15, colorsatfac=2, option=1, filename=None, _data_release=None):
-        """
-        Downloads a trilogy image.
-
-        Parameters
-        ----------
-        ra : float
-            The RA of the center of the stamp.
-        dec : float
-            The DEC of the center of the stamp.
-        size : float
-            The size of the stamp in arcseconds.
-        R : str
-            Combinations of bands to use for the red channel.
-        G : str
-            Combinations of bands to use for the green channel.
-        B : str
-            Combinations of bands to use for the blue channel.
-        noiselum : float, optional
-            The noise luminosity. Defaults to 0.15.
-        satpercent : float, optional
-            The saturation percentage. Defaults to 0.15.
-        colorsatfac : int, optional
-            The saturation factor. Defaults to 2.
-        option : int, optional
-            The option to use for the match 1 -> first match, 2 -> second match.
-        filename : str, optional
-            The name of the file to save the FITS data to.
-        _data_release : str, optional
-            The data release to download the FITS file for.
-
-        Returns
-        -------
-        astropy.io.fits.HDUList
-            The FITS data for the requested field and band.
-        """
-        data = {
-            "ra": ra,
-            "dec": dec,
-            "size": size,
-            "reqOrder": f"{R}-{G}-{B}",
-            "noiselum": noiselum,
-            "satpercent": satpercent,
-            "colorsatfac": colorsatfac,
-            "option": str(option),
-            "dr": _data_release
-        }
-        res = self._make_request('POST', f"{self.SERVER_URL}/trilogy_image", json_=data)
-        
-        frame = open_image(res.content)
-        if filename:
-            save_image(res.content, filename=filename)
-        return frame
-    
-    def stamp_detection(self, ra, dec, size, bands = "G, R, I, Z", return_weight = False, option = 1, filename=None, _data_release=None):
-            """
-            Sends a POST request to the S-PLUS server to retrieve a stamp detection image.
-
-            Args:
-                ra (float): Right ascension of the center of the stamp in degrees.
-                dec (float): Declination of the center of the stamp in degrees.
-                size (float): Size of the stamp in arcseconds.
-                bands (str, optional): Comma-separated list of bands to retrieve. Defaults to "G, R, I, Z".
-                return_weight (bool, optional): Whether to return the weight map along with the stamp image. Defaults to False. This option is only allowed with filename, because it saves a .zip
-                option (int, optional): Detection algorithm option. Defaults to 1.
-                filename (str, optional): If provided, saves the stamp image to the specified file path. Defaults to None.
-                _data_release (str, optional): Data release version. Defaults to None.
-
-            Raises:
-                SplusError: If return_weight is True but filename is None.
-
-            Returns:
-                astropy.io.fits: If filename is None, returns a fits.
-            """
-            
-            if return_weight and not filename:
-                raise SplusError("return_weight is True, but filename is None")
-            
-            data = {
-                "ra": ra,
-                "dec": dec,
-                "size": size,
-                "bands": str(bands).replace("[", "").replace("]", "").replace("'", "").replace(" ", ""),
-                "return_weight": return_weight,
-                "option": str(option),
-                "dr": _data_release
-            }
-            
-            res = self._make_request('POST', f"{self.SERVER_URL}/stamp_detection_image", json_=data)
-            
-            frame = open_fits(res.content)
-            if filename:
-                open(filename + ".zip", 'wb').write(res.content)
-                return 
-            return frame
-    
-    def checkcoords(self, ra, dec):
-            """
-            Check if the given coordinates are within the survey area.
-
-            Args:
-                ra (float): The right ascension of the target in degrees.
-                dec (float): The declination of the target in degrees.
-
-            Returns:
-                dict: A dictionary containing the result of the request.
-            """
-            data = {
-                "ra": ra,
-                "dec": dec,
-            }
-            res = self._make_request('POST', f"{self.SERVER_URL}/check_near_field", json_=data)
-            return res.json()
-    
-    ## query method (same from old API)
-    def query(self, query, table_upload=None, publicdata=None):
-        from astropy.io.votable import from_table, writeto
-        from xml.dom import minidom
-        from astropy.table import Table
-        
-        """Perform async queries on splus cloud TAP service. 
-
-        Args:
-            query (str): query itself.
-            table_upload (pandas.DataFrame, optional): table to upload. Defaults to None.
-            publicdata (bool, optional): If internal wants to access public data. Defaults to None.
-
-        Returns:
-            astropy.table.Table: result table.
-        """        
-        if self.collab:
-            baselink = f"{self.SERVER_IP}/tap/tap/async/"
+        if weight:
+            weight = "weight"
+        if not field_name:
+            stamp_bytes = self.client.create_stamp_by_coordinates(
+                collection_id=collection_id,
+                filter=band,
+                ra=ra,
+                dec=dec,
+                size=size,
+                size_unit=size_unit,
+                pattern=weight if weight else "",
+                output_path=outfile
+            )
         else:
-            baselink = f"{self.SERVER_IP}/public-TAP/tap/async/"
-
-
-        if publicdata and self.collab:
-            baselink = f"{self.SERVER_IP}/public-TAP/tap/async/"
-
-        data = {
-            "request": 'doQuery',
-            "version": '1.0',
-            "lang": 'ADQL',
-            "phase": 'run',
-            "query": query,
-            "format": 'fits'
-        }
+            stamp_bytes = self.client.stamp_images.create_stamp_by_object(
+                collection_id=collection_id,
+                object_name=field_name,
+                filter_name=band,
+                ra=ra,
+                dec=dec,
+                size=size,
+                size_unit=size_unit,
+                pattern=weight if weight else "",
+                output_path=outfile
+            )
         
-        if str(type(table_upload)) != "<class 'NoneType'>":
-            if 'astropy.table' in str(type(table_upload)):
-                if len(table_upload) > 6000:
-                    print('Cutting to the first 6000 objects!')
-                    table_upload = table_upload[0:6000]
-                    table_upload = from_table(table_upload)
+        return fits.open(io.BytesIO(stamp_bytes))
 
-                    IObytes = io.BytesIO()
-                    writeto(table_upload, IObytes)
+    def lupton_rgb(self, ra, dec, size, R="I", G="R", B="G", Q=8, stretch=3, field_name=None, size_unit="pixels", outfile=None, _data_release="dr4"):
+        """Retrieve a Lupton RGB composite image."""
+        collection = self.get_collection_id_by_pattern(_data_release)
+        collection_id = collection['id']
 
-                    IObytes.seek(0)
-                else:
-                    table_upload = from_table(table_upload)
+        if not field_name:
+            stamp_bytes = self.client.create_rgb_image_by_coordinates(
+                collection_id=collection_id,
+                ra=ra,
+                dec=dec,
+                size=size,
+                r_filter=R,
+                g_filter=G,
+                b_filter=B,
+                Q=Q,
+                size_unit=size_unit,
+                stretch=stretch,
+                output_path=outfile
+            )
+        else:
+            stamp_bytes = self.client.lupton_images.create_rgb_by_object(
+                collection_id=collection_id,
+                object_name=field_name,
+                ra=ra,
+                dec=dec,
+                size=size,
+                r_filter=R,
+                g_filter=G,
+                b_filter=B,
+                Q=Q,
+                size_unit=size_unit,
+                stretch=stretch,
+                output_path=outfile
+            )
 
-                    IObytes = io.BytesIO()
-                    writeto(table_upload, IObytes)
+        return Image.open(io.BytesIO(stamp_bytes))
 
-                    IObytes.seek(0)
+    def trilogy_image(self, ra, dec, size, R=["R", "I", "F861", "Z"], G=["G", "F515", "F660"], B=["U", "F378", "F395", "F410", "F430"], noiselum=0.15, satpercent=0.15, colorsatfac=2, size_unit="pixels", field_name=None, outfile=None, _data_release="dr4"):
+        """Retrieve a Trilogy RGB composite image."""
+        collection = self.get_collection_id_by_pattern(_data_release)
+        collection_id = collection['id']
 
-            elif 'astropy.io.votable' in str(type(table_upload)):
-                if table_upload.get_first_table().nrows > 6000:
-                    return 'votable bigger than 6000'
-                else:
-                    IObytes = io.BytesIO()
-                    writeto(table_upload, IObytes)
-                    IObytes.seek(0)
+        if not field_name:
+            stamp_bytes = self.client.trilogy_images.create_trilogy_rgb_by_coordinates(
+                collection_id=collection_id,
+                ra=ra,
+                dec=dec,
+                size=size,
+                r_filters=R,
+                g_filters=G,
+                b_filters=B,
+                size_unit=size_unit,
+                noiselum=noiselum,
+                satpercent=satpercent,
+                colorsatfac=colorsatfac,
+                output_path=outfile
+            )
+        else:
+            stamp_bytes = self.client.trilogy_images.create_trilogy_rgb_by_object(
+                collection_id=collection_id,
+                object_name=field_name,
+                ra=ra,
+                dec=dec,
+                size=size,
+                r_filters=R,
+                g_filters=G,
+                b_filters=B,
+                noiselum=noiselum,
+                size_unit=size_unit,
+                satpercent=satpercent,
+                colorsatfac=colorsatfac,
+                output_path=outfile
+            )
 
-            elif 'DataFrame' in str(type(table_upload)):
-                if len(table_upload) > 6000:
-                    print('Cutting to the first 6000 objects!')
-                    table_upload = table_upload[0:6000]
-                    table_upload = Table.from_pandas(table_upload)
-                    table_upload = from_table(table_upload)
-                    IObytes = io.BytesIO()
-                    writeto(table_upload, IObytes)
-                    IObytes.seek(0)
-                else:
-                    table_upload = Table.from_pandas(table_upload)
-                    table_upload = from_table(table_upload)
-                    IObytes = io.BytesIO()
-                    writeto(table_upload, IObytes)
-                    IObytes.seek(0)
-                    
-
+        return Image.open(io.BytesIO(stamp_bytes))
+    
+    def query(self, query, table_upload=None, table_name=None):
+        """Run a query on the server, optionally uploading a table."""
+        if table_upload is None and table_name is None:
+            import pandas as pd
+            from astropy.table import Table
+            
+            table_upload_bytes = None
+            if isinstance(table_upload, pd.DataFrame):
+                table_upload_bytes = table_upload.to_csv(index=False).encode()
+            elif isinstance(table_upload, Table):
+                table_upload_bytes = table_upload.to_pandas().to_csv(index=False).encode()
             else:
-                return 'Table type not supported'
+                raise ValueError("table_upload must be a pandas DataFrame or an astropy Table")
 
-            data['upload'] = 'upload,param:uplTable'
-            res = requests.post(baselink , data = data, headers=self.headers, files={'uplTable': IObytes.read()})
-
-        if not table_upload:
-            res = requests.post(baselink , data = data, headers=self.headers)
-
-        xmldoc = minidom.parse(io.BytesIO(res.content))
-
-        try:
-            item = xmldoc.getElementsByTagName('phase')[0]
-            process = item.firstChild.data
-
-            item = xmldoc.getElementsByTagName('jobId')[0]
-            jobID = item.firstChild.data
-
-            while process == 'EXECUTING':
-                res = requests.get(baselink + jobID, headers=self.headers)
-                xmldoc = minidom.parse(io.BytesIO(res.content))
-
-                item = xmldoc.getElementsByTagName('phase')[0]
-                process = item.firstChild.data
-                time.sleep(self.refresh_rate)
-
-            if process == 'COMPLETED':
-                item = xmldoc.getElementsByTagName('result')[0]
-                link = item.attributes['xlink:href'].value
-
-                link = link.replace("http://192.168.10.23:8080", f"{self.SERVER_IP}").replace("http://10.180.0.209:8080", f"{self.SERVER_IP}").replace("http://10.180.0.207:8080", f"{self.SERVER_IP}").replace("http://10.180.0.219:8080", f"{self.SERVER_IP}")
-                res = requests.get(link, headers=self.headers)
-                
-                self.lastres = 'query'
-                self.lastcontent = Table.read(io.BytesIO(res.content))
-                
-                return self.lastcontent
-
-            if process == 'ERROR':
-                item = xmldoc.getElementsByTagName('message')[0]
-                message = item.firstChild.data
-
-                print("Error: ", message)
-
-        except:
-            item = xmldoc.getElementsByTagName('INFO')
-            print(item[0].attributes['value'].value, ": ", item[0].firstChild.data)
-
-if __name__ == "__main__":
-    pass
-
-    ## TESTS
-    #core = Core()
-    #core.field_frame('STRIPE82-0002', "R")
-    
-    #core.field_info('STRIPE82-0002')
-    
-    # core.info_mar(
-    #     {
-    #         "endpoint": "biasblock",
-    #         "startDate": "2018-01-01",
-    #         "endDate": "2018-02-01"
-    #     }
-    # )
-    
-    #core.fetch_mar_file("PROCESSED/G/2018-09-15/proc_STRIPE82-20180915-032415.png", filename="/Users/gustavo/Downloads/te.png")
-    
-    
+        response = self.client.query_and_wait(
+            query_text=query,
+            table_name=table_name,
+            file=table_upload_bytes
+        )
+        return response.data

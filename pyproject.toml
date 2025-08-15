@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=67", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "splusdata"
+version = "5.11"
+description = "Download SPLUS catalogs, FITS and more"
+authors = [
+    { name = "Gustavo Schwarz", email = "gustavo.b.schwarz@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.7"
+license = { text = "Apache-2.0" }
+keywords = ["S-PLUS", "astronomy", "catalogs", "FITS"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License"
+]
+dependencies = [
+    "adss",
+    "requests",
+    "astropy",
+    "astroquery",
+    "numpy",
+    "pandas",
+    "scipy",
+    "pillow",
+    "pyyaml"
+]
+
+[project.scripts]
+splusdata = "splusdata.readconf:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+# python -m build
+# python -m twine upload dist/*
