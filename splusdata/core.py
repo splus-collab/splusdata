@@ -31,9 +31,8 @@ class Core:
         if not username:
             username = input("splus.cloud username: ")
         if not password:    
-            password = getpass("splus.cloud password: ")
-            if self.auto_renew:
-                self.password = password
+            password = getpass.getpass("splus.cloud password: ")
+            
         
         self.client = adss.ADSSClient(
             SERVER_IP,
@@ -75,6 +74,11 @@ class Core:
         
         if weight:
             pattern = "weight"
+        else:
+            pattern = ""
+        
+        pattern = patterns[pattern]
+        
         for c in candidates:
             if pattern in c['filename']:
                 f_candidates.append(c)
