@@ -60,10 +60,10 @@ class Core:
         collection_id = collection['id']
         
         candidates = self.client.list_image_files(collection_id, object_name=field, filter_name=band)
-
+        
         if len(candidates) == 0 and ("-" in field or "_" in field):
             field = field.replace("-", "_") if "-" in field else field.replace("_", "-")
-            candidates = self.client.list_image_files(collection_id, object_name=field)
+            candidates = self.client.list_image_files(collection_id, object_name=field, filter_name=band)
         if len(candidates) == 0:
             raise SplusdataError(f"Field {field} not found in band {band}")
         
@@ -209,7 +209,8 @@ class Core:
     
     def query(self, query, table_upload=None, table_name=None):
         """Run a query on the server, optionally uploading a table."""
-        if table_upload is None and table_name is None:
+        table_upload_bytes = None
+        if table_upload is not None and table_name is not None:
             import pandas as pd
             from astropy.table import Table
             
@@ -227,3 +228,27 @@ class Core:
             file=table_upload_bytes
         )
         return response.data
+
+    def get_zp_file_idr6(self, field, band, _data_release = "dr6"):
+        import json
+        collection = self.get_collection_id_by_pattern(_data_release)
+        collection_id = collection['id']
+        
+        files = self.client.list_image_files(
+            collection_id, 
+            filter_str=f"{field}_{band}_zp", 
+        )
+        if len(files) == 0:
+            raise SplusdataError(f"No zp model found for field {field} in band {band} in {_data_release}")
+        file = files[0]
+        
+        print(f"Downloading zp_model {file['filename']}")
+        json_bytes = self.client.download_image(file["id"])
+        json_data = json.loads(json_bytes)
+        return json_data
+    
+    def get_zp(self, field, band, ra, dec):
+        model = self.get_zp_file_idr6(field, band)
+        
+        from splusdata.features.zp_map import zp_at_coord
+        return zp_at_coord(model, ra, dec)  # Example coordinates, adjust as needed
