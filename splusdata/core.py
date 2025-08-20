@@ -262,6 +262,9 @@ class Core:
         calibrated_hdu, factor_map = calibrate_hdu_with_zpmodel(
             stamp[1], zp_model, in_place=False, return_factor=True
         )
+        
+        if outfile:
+            calibrated_hdu.writeto(outfile, overwrite=True)
         return calibrated_hdu
         
         
