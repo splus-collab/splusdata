@@ -4,7 +4,7 @@ from splusdata.features import filterbw
 from splusdata.features.hipscat import get_hipscats
 
 from splusdata.features.extinction import SplusExtinction
-from splusdata.features.zeropoints import get_zeropoint
+from splusdata.features.zeropointsdr4 import get_zeropoint
 
 import splusdata.vacs
 

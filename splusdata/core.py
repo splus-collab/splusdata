@@ -229,7 +229,7 @@ class Core:
         )
         return response.data
 
-    def get_zp_file_idr6(self, field, band, _data_release = "dr6"):
+    def get_zp_file(self, field, band, _data_release = "dr6"):
         import json
         collection = self.get_collection_id_by_pattern(_data_release)
         collection_id = collection['id']
@@ -248,7 +248,20 @@ class Core:
         return json_data
     
     def get_zp(self, field, band, ra, dec):
-        model = self.get_zp_file_idr6(field, band)
+        model = self.get_zp_file(field, band)
         
-        from splusdata.features.zp_map import zp_at_coord
+        from splusdata.features.zeropoints.zp_map import zp_at_coord
         return zp_at_coord(model, ra, dec)  # Example coordinates, adjust as needed
+    
+    def calibrated_stamp(self, ra, dec, size, band, weight=False, field_name=None, size_unit="pixels", outfile=None, _data_release="dr6"):
+        stamp = self.stamp(ra, dec, size, band, weight=weight, field_name=field_name, size_unit=size_unit, _data_release=_data_release)
+        
+        from splusdata.features.zeropoints.zp_image import calibrate_hdu_with_zpmodel
+        zp_model = self.get_zp_file(stamp[1].header["FIELD"], stamp[1].header["FILTER"], _data_release=_data_release)
+        
+        calibrated_hdu, factor_map = calibrate_hdu_with_zpmodel(
+            stamp[1], zp_model, in_place=False, return_factor=True
+        )
+        return calibrated_hdu
+        
+        
