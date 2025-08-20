@@ -46,6 +46,12 @@ class Core:
         collections = self.client.get_image_collections()
         self.collections = collections
 
+    def check_available_images_releases(self):
+        collections = self.client.get_image_collections()
+
+        names = [col['name'] for col in collections]
+        return names
+
     def get_collection_id_by_pattern(self, pattern):
         """Return first collection whose name contains given pattern."""
         self._load_collections()
@@ -54,16 +60,16 @@ class Core:
                 return col
         raise SplusdataError("Collection not found")
     
-    def field_frame(self, field, band, weight=False, outfile=None, _data_release="dr4"):
+    def field_frame(self, field, band, weight=False, outfile=None, data_release="dr4"):
         """Retrieve a full field frame FITS image for a given field and band."""
-        collection = self.get_collection_id_by_pattern(_data_release)
+        collection = self.get_collection_id_by_pattern(data_release)
         collection_id = collection['id']
         
-        candidates = self.client.list_image_files(collection_id, object_name=field, filter_name=band)
+        candidates = self.client.list_image_files(collection_id, filter_str=field, filter_name=band)
         
         if len(candidates) == 0 and ("-" in field or "_" in field):
             field = field.replace("-", "_") if "-" in field else field.replace("_", "-")
-            candidates = self.client.list_image_files(collection_id, object_name=field, filter_name=band)
+            candidates = self.client.list_image_files(collection_id, filter_str=field, filter_name=band)
         if len(candidates) == 0:
             raise SplusdataError(f"Field {field} not found in band {band}")
         
@@ -98,9 +104,9 @@ class Core:
         
         return fits.open(io.BytesIO(image_bytes))
                                    
-    def stamp(self, ra, dec, size, band, weight=False, field_name=None, size_unit="pixels", outfile=None, _data_release="dr4"):
+    def stamp(self, ra, dec, size, band, weight=False, field_name=None, size_unit="pixels", outfile=None, data_release="dr4"):
         """Retrieve a FITS cutout (stamp) at given coordinates or field name."""
-        collection = self.get_collection_id_by_pattern(_data_release)
+        collection = self.get_collection_id_by_pattern(data_release)
         collection_id = collection['id']
         
         if weight:
@@ -131,9 +137,9 @@ class Core:
         
         return fits.open(io.BytesIO(stamp_bytes))
 
-    def lupton_rgb(self, ra, dec, size, R="I", G="R", B="G", Q=8, stretch=3, field_name=None, size_unit="pixels", outfile=None, _data_release="dr4"):
+    def lupton_rgb(self, ra, dec, size, R="I", G="R", B="G", Q=8, stretch=3, field_name=None, size_unit="pixels", outfile=None, data_release="dr4"):
         """Retrieve a Lupton RGB composite image."""
-        collection = self.get_collection_id_by_pattern(_data_release)
+        collection = self.get_collection_id_by_pattern(data_release)
         collection_id = collection['id']
 
         if not field_name:
@@ -168,9 +174,9 @@ class Core:
 
         return Image.open(io.BytesIO(stamp_bytes))
 
-    def trilogy_image(self, ra, dec, size, R=["R", "I", "F861", "Z"], G=["G", "F515", "F660"], B=["U", "F378", "F395", "F410", "F430"], noiselum=0.15, satpercent=0.15, colorsatfac=2, size_unit="pixels", field_name=None, outfile=None, _data_release="dr4"):
+    def trilogy_image(self, ra, dec, size, R=["R", "I", "F861", "Z"], G=["G", "F515", "F660"], B=["U", "F378", "F395", "F410", "F430"], noiselum=0.15, satpercent=0.15, colorsatfac=2, size_unit="pixels", field_name=None, outfile=None, data_release="dr4"):
         """Retrieve a Trilogy RGB composite image."""
-        collection = self.get_collection_id_by_pattern(_data_release)
+        collection = self.get_collection_id_by_pattern(data_release)
         collection_id = collection['id']
 
         if not field_name:
@@ -229,9 +235,9 @@ class Core:
         )
         return response.data
 
-    def get_zp_file(self, field, band, _data_release = "dr6"):
+    def get_zp_file(self, field, band, data_release = "dr6"):
         import json
-        collection = self.get_collection_id_by_pattern(_data_release)
+        collection = self.get_collection_id_by_pattern(data_release)
         collection_id = collection['id']
         
         files = self.client.list_image_files(
@@ -239,7 +245,7 @@ class Core:
             filter_str=f"{field}_{band}_zp", 
         )
         if len(files) == 0:
-            raise SplusdataError(f"No zp model found for field {field} in band {band} in {_data_release}")
+            raise SplusdataError(f"No zp model found for field {field} in band {band} in {data_release}")
         file = files[0]
         
         print(f"Downloading zp_model {file['filename']}")
@@ -253,11 +259,11 @@ class Core:
         from splusdata.features.zeropoints.zp_map import zp_at_coord
         return zp_at_coord(model, ra, dec)  # Example coordinates, adjust as needed
     
-    def calibrated_stamp(self, ra, dec, size, band, weight=False, field_name=None, size_unit="pixels", outfile=None, _data_release="dr6"):
-        stamp = self.stamp(ra, dec, size, band, weight=weight, field_name=field_name, size_unit=size_unit, _data_release=_data_release)
+    def calibrated_stamp(self, ra, dec, size, band, weight=False, field_name=None, size_unit="pixels", outfile=None, data_release="dr6"):
+        stamp = self.stamp(ra, dec, size, band, weight=weight, field_name=field_name, size_unit=size_unit, data_release=data_release)
         
         from splusdata.features.zeropoints.zp_image import calibrate_hdu_with_zpmodel
-        zp_model = self.get_zp_file(stamp[1].header["FIELD"], stamp[1].header["FILTER"], _data_release=_data_release)
+        zp_model = self.get_zp_file(stamp[1].header["FIELD"], stamp[1].header["FILTER"], data_release=data_release)
         
         calibrated_hdu, factor_map = calibrate_hdu_with_zpmodel(
             stamp[1], zp_model, in_place=False, return_factor=True
@@ -266,5 +272,3 @@ class Core:
         if outfile:
             calibrated_hdu.writeto(outfile, overwrite=True)
         return calibrated_hdu
-        
-        
