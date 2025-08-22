@@ -5,6 +5,8 @@ from PIL import Image
 from astropy.io import fits
 import io
 
+from splusdata.features.io import print_level
+
 class SplusdataError(Exception):
     """Custom exception type for S-PLUS data errors raised by this helper module.
 
@@ -79,7 +81,7 @@ class Core:
     * All methods pass through to a single `adss.ADSSClient` instance.
     """
 
-    def __init__(self, username=None, password=None, SERVER_IP=f"https://splus.cloud", auto_renew=False):
+    def __init__(self, username=None, password=None, SERVER_IP=f"https://splus.cloud", auto_renew=False, verbose=0):
         """Initialize a Core client.
 
         Parameters
@@ -92,6 +94,8 @@ class Core:
             Base URL of the S-PLUS service (default: "https://splus.cloud").
         auto_renew : bool, optional
             Placeholder for future token auto-renew behavior (unused here).
+        verbose : int, optional
+            Verbosity level. Defaults to 0.
 
         Attributes
         ----------
@@ -116,6 +120,7 @@ class Core:
             password=password
         )
         self.collections = []
+        self.verbose = verbose
         
     def _load_collections(self):
         """Fetch and cache image collections from the server.
@@ -564,7 +569,7 @@ class Core:
             raise SplusdataError(f"No zp model found for field {field} in band {band} in {data_release}")
         file = files[0]
         
-        print(f"Downloading zp_model {file['filename']}")
+        print_level(f"Downloading zp_model {file['filename']}", 1, self.verbose)
         json_bytes = self.client.download_image(file["id"])
         json_data = json.loads(json_bytes)
         return json_data
