@@ -26,11 +26,13 @@ dependencies = [
     "pandas",
     "scipy",
     "pillow",
-    "pyyaml"
+    "pyyaml",
+    "tqdm",
 ]
 
 [project.scripts]
 splusdata = "splusdata.readconf:main"
+scubes_dr6 = "splusdata.scubes.core:scubes"
 
 [tool.setuptools.packages.find]
 where = ["."]
