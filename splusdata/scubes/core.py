@@ -44,7 +44,6 @@ Note that *10h37m2.5s* is a totally different angle from *10:37:2.5*
 
 SCUBES_ARGS = {
     # optional arguments
-    'redo': ['r', dict(action='store_true', default=False, help='Enable redo mode to overwrite final cubes.')],
     'force': ['f', dict(action='store_true', default=False, help='Force overwrite of existing files.')],
     'size': ['l', dict(default=500, type=int, help='Size of the cube in pixels. If size is a odd number, the program will choose the closest even integer.')],
     'workdir': ['w', dict(default=getcwd(), help='Working directory.')],
@@ -116,7 +115,8 @@ class SCubes:
                 _ = self.conn.calibrated_stamp(**kw_args)
                 images.append(kw_args['outfile'])
             else:
-                images.append(self.conn.calibrated_stamp(**kw_args))
+                x = self.conn.calibrated_stamp(**kw_args)
+                images.append(x)
             # wei
             kw_args['weight'] = True
             if outpath is not None:
@@ -220,11 +220,10 @@ class SCubes:
         cube_prim_hdu.header['SIZE'] = (self.size, 'Side of the stamp in pixels')
         cube_prim_hdu.header['RA'] = self.ra
         cube_prim_hdu.header['DEC'] = self.dec
-        cube_prim_hdu.header.update(
-            self._stamp_WCS_to_cube_header(
-                self.images[0].header if self.cubepath is None else fits.getheader(self.images[0], ext=0)
-            )
-        )
+        hdr = self.images[0].header if self.cubepath is None else fits.getheader(self.images[0], ext=1)
+        cube_prim_hdu.header.update(self._stamp_WCS_to_cube_header(hdr))
+        for key in ['X0TILE', 'X01TILE', 'Y0TILE', 'Y01TILE']:
+            cube_prim_hdu.header[key] = hdr.get(key)
         # DATA HDU
         flam_hdu = fits.ImageHDU(self.flam__byx.value, cube_prim_hdu.header)
         flam_hdu.header['EXTNAME'] = ('DATA', 'Name of the extension')       
@@ -246,7 +245,7 @@ class SCubes:
         fits.HDUList(self.cube).writeto(cubepath, overwrite=overwrite)
         print_level(f'Cube successfully created!', 1, self.verbose)    
 
-    def create_cube(self, flam_scale=None, objname=None, outpath=None, redo=False, data_ext=1, write_fits=False):
+    def create_cube(self, flam_scale=None, objname=None, outpath=None, force=False, data_ext=1, write_fits=False):
         self.flam_scale = 1e-19 if flam_scale is None else flam_scale
         self.objname = 'myobj' if objname is None else objname
         self.outpath = '.' if outpath is None else outpath
@@ -259,16 +258,16 @@ class SCubes:
 
             self.cubepath = join(self.outpath, f'{self.objname}_cube.fits')
 
-            if exists(self.cubepath) and not redo:
+            if exists(self.cubepath) and not force:
                 raise OSError('SCube exists!')
 
-        self._download_calibrated_stamps(objname, outpath, force=redo)
+        self._download_calibrated_stamps(objname, outpath, force=force)
         self._photospectra(flam_scale, ext=data_ext)
 
         self.cube = self._create_cube_hdulist(objname, ext=data_ext)
 
         if (self.cubepath is not None) and write_fits:
-            self.write(self.cubepath, redo)
+            self.write(self.cubepath, force)
            
 def scubes_argparse(args):
     '''
@@ -324,4 +323,4 @@ def scubes():
     )
 
     outpath = join(args.workdir, args.object)
-    scube.create_cube(objname=args.object, outpath=outpath, redo=args.redo, data_ext=1, write_fits=True)
+    scube.create_cube(objname=args.object, outpath=outpath, force=args.force, data_ext=1, write_fits=True)
