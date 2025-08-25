@@ -10,9 +10,10 @@ from splusdata.core import Core
 import astropy.constants as const
 from os.path import join, exists, isfile
 
+from splusdata.scubes.read import read_scube
 from splusdata.scripts.args import create_parser
-from splusdata.features.io import print_level, convert_coord_to_degrees
 from splusdata.vars import BANDS, BANDWAVEINFO, get_band_info
+from splusdata.features.io import print_level, convert_coord_to_degrees
 
 __script_author__ = 'Eduardo A. D. Lacerda <dhubax@gmail.com>'
 __script_version__ = '0.1.idr6-beta'
@@ -170,16 +171,15 @@ class SCubes:
         -------
         :class:`~astropy.io.fits.Header`
             Cube header with updated WCS information.
-        '''        
+        '''
         w = WCS(header)
         nw = WCS(naxis=3)
-        nw.wcs.cdelt[:2] = w.wcs.cdelt
-        nw.wcs.crval[:2] = w.wcs.crval
-        nw.wcs.crpix[:2] = w.wcs.crpix
-        nw.wcs.ctype[0] = w.wcs.ctype[0]
-        nw.wcs.ctype[1] = w.wcs.ctype[1]
+        nw.wcs.cdelt = [w.wcs.cdelt[0], w.wcs.cdelt[1], 1]
+        nw.wcs.crval = [w.wcs.crval[0], w.wcs.crval[1], 0]
+        nw.wcs.crpix = [w.wcs.crpix[0], w.wcs.crpix[1], 0]
+        nw.wcs.ctype = [w.wcs.ctype[0], w.wcs.ctype[1], '']
         try:
-            nw.wcs.pc[:2, :2] = w.wcs.pc
+            nw.wcs.pc[:2, :2] = w.wcs.get_pc()
         except:
             pass
         return nw.to_header()
@@ -238,14 +238,14 @@ class SCubes:
             hdu.header['BUNIT'] = (f'{self.flam_unit}', 'Physical units of the array values')
         hdul.append(self._weights_mask_hdu())
         hdul.append(self._metadata_hdu(ext))
-        return hdul
+        return fits.HDUList(hdul)
 
     def write(self, cubepath, overwrite=False):
         print_level(f'writting cube {cubepath}', 1, self.verbose)
-        fits.HDUList(self.cube).writeto(cubepath, overwrite=overwrite)
+        self.cube.writeto(cubepath, overwrite=overwrite)
         print_level(f'Cube successfully created!', 1, self.verbose)    
 
-    def create_cube(self, flam_scale=None, objname=None, outpath=None, force=False, data_ext=1, write_fits=False):
+    def create_cube(self, flam_scale=None, objname=None, outpath=None, force=False, data_ext=1, write_fits=False, return_scube=False):
         self.flam_scale = 1e-19 if flam_scale is None else flam_scale
         self.objname = 'myobj' if objname is None else objname
         self.outpath = '.' if outpath is None else outpath
@@ -268,6 +268,9 @@ class SCubes:
 
         if (self.cubepath is not None) and write_fits:
             self.write(self.cubepath, force)
+        
+        if return_scube:
+            return read_scube(self.cube)
            
 def scubes_argparse(args):
     '''
@@ -316,11 +319,11 @@ def scubes():
         warnings.simplefilter('ignore', category=VerifyWarning)
         warnings.simplefilter('ignore', category=FITSFixedWarning)
 
-    scube = SCubes(
+    creator = SCubes(
         ra=args.ra, dec=args.dec, field=args.field, 
         size=args.size, username=args.username, password=args.password,
         verbose=args.verbose,
     )
 
     outpath = join(args.workdir, args.object)
-    scube.create_cube(objname=args.object, outpath=outpath, force=args.force, data_ext=1, write_fits=True)
+    _ = creator.create_cube(objname=args.object, outpath=outpath, force=args.force, data_ext=1, write_fits=True)
