@@ -10,55 +10,9 @@ from splusdata.core import Core
 import astropy.constants as const
 from os.path import join, exists, isfile
 
-from splusdata.scripts.args import create_parser
-from splusdata.features.io import print_level, convert_coord_to_degrees
+from splusdata.scubes.read import read_scube
 from splusdata.vars import BANDS, BANDWAVEINFO, get_band_info
-
-__script_author__ = 'Eduardo A. D. Lacerda <dhubax@gmail.com>'
-__script_version__ = '0.1.idr6-beta'
-
-SPLUS_MOTD_TOP = '┌─┐   ┌─┐┬ ┬┌┐ ┌─┐┌─┐ '
-SPLUS_MOTD_MID = '└─┐───│  │ │├┴┐├┤ └─┐ '
-SPLUS_MOTD_BOT = '└─┘   └─┘└─┘└─┘└─┘└─┘ '
-SPLUS_MOTD_SEP = '----------------------'
-
-SCUBES_PROG_DESC = f'''
-{SPLUS_MOTD_TOP} | Create S-PLUS galaxies data cubes, a.k.a. S-CUBES. 
-{SPLUS_MOTD_MID} | S-CUBES is an organized FITS file with data, errors, 
-{SPLUS_MOTD_BOT} | mask and metadata about some galaxy present on any 
-{SPLUS_MOTD_SEP} + S-PLUS observed tile. Any problem contact:
-
-   {__script_author__}
-
-The input values of RA and DEC will be converted to degrees using the 
-scubes.utilities.io.convert_coord_to_degrees(). All scripts with RA 
-and DEC inputs parse angles in two different units:
-
-- **hourangle**: using *hms* divisors; Ex: *10h37m2.5s*
-- **degrees**: using *:* or *dms*  divisors; Ex: *10:37:2.5* or *10d37m2.5s*
-
-Note that *10h37m2.5s* is a totally different angle from *10:37:2.5* 
-(*159.26 deg* and *10.62 deg* respectively).
-
-'''
-
-SCUBES_ARGS = {
-    # optional arguments
-    'redo': ['r', dict(action='store_true', default=False, help='Enable redo mode to overwrite final cubes.')],
-    'force': ['f', dict(action='store_true', default=False, help='Force overwrite of existing files.')],
-    'size': ['l', dict(default=500, type=int, help='Size of the cube in pixels. If size is a odd number, the program will choose the closest even integer.')],
-    'workdir': ['w', dict(default=getcwd(), help='Working directory.')],
-    'verbose': ['v', dict(action='count', default=0, help='Verbosity level.')],
-    'username': ['U', dict(default=None, help='S-PLUS Cloud username.')],
-    'password': ['P', dict(default=None, help='S-PLUS Cloud password.')],
-     #'data_release': ['d', dict(default='dr4', type=str, help='Select S-PLUS Data Release')],
-
-    # positional arguments
-    'field': ['pos', dict(metavar='SPLUS_TILE', help='Name of the S-PLUS field')],
-    'ra': ['pos', dict(metavar='RA', help="Object's right ascension")],
-    'dec': ['pos', dict(metavar='DEC', help="Object's declination")],
-    'object': ['pos', dict(metavar='OBJECT_NAME', help="Object's name")],
-}
+from splusdata.features.io import print_level, convert_coord_to_degrees
 
 def _getval_array(pathlist, key, ext):
     return np.array([fits.getval(img, key, ext) for img in pathlist])
@@ -116,7 +70,8 @@ class SCubes:
                 _ = self.conn.calibrated_stamp(**kw_args)
                 images.append(kw_args['outfile'])
             else:
-                images.append(self.conn.calibrated_stamp(**kw_args))
+                x = self.conn.calibrated_stamp(**kw_args)
+                images.append(x)
             # wei
             kw_args['weight'] = True
             if outpath is not None:
@@ -170,16 +125,15 @@ class SCubes:
         -------
         :class:`~astropy.io.fits.Header`
             Cube header with updated WCS information.
-        '''        
+        '''
         w = WCS(header)
         nw = WCS(naxis=3)
-        nw.wcs.cdelt[:2] = w.wcs.cdelt
-        nw.wcs.crval[:2] = w.wcs.crval
-        nw.wcs.crpix[:2] = w.wcs.crpix
-        nw.wcs.ctype[0] = w.wcs.ctype[0]
-        nw.wcs.ctype[1] = w.wcs.ctype[1]
+        nw.wcs.cdelt = [w.wcs.cdelt[0], w.wcs.cdelt[1], 1]
+        nw.wcs.crval = [w.wcs.crval[0], w.wcs.crval[1], 0]
+        nw.wcs.crpix = [w.wcs.crpix[0], w.wcs.crpix[1], 0]
+        nw.wcs.ctype = [w.wcs.ctype[0], w.wcs.ctype[1], '']
         try:
-            nw.wcs.pc[:2, :2] = w.wcs.pc
+            nw.wcs.pc[:2, :2] = w.wcs.get_pc()
         except:
             pass
         return nw.to_header()
@@ -220,11 +174,10 @@ class SCubes:
         cube_prim_hdu.header['SIZE'] = (self.size, 'Side of the stamp in pixels')
         cube_prim_hdu.header['RA'] = self.ra
         cube_prim_hdu.header['DEC'] = self.dec
-        cube_prim_hdu.header.update(
-            self._stamp_WCS_to_cube_header(
-                self.images[0].header if self.cubepath is None else fits.getheader(self.images[0], ext=0)
-            )
-        )
+        hdr = self.images[0].header if self.cubepath is None else fits.getheader(self.images[0], ext=1)
+        cube_prim_hdu.header.update(self._stamp_WCS_to_cube_header(hdr))
+        for key in ['X0TILE', 'X01TILE', 'Y0TILE', 'Y01TILE']:
+            cube_prim_hdu.header[key] = hdr.get(key)
         # DATA HDU
         flam_hdu = fits.ImageHDU(self.flam__byx.value, cube_prim_hdu.header)
         flam_hdu.header['EXTNAME'] = ('DATA', 'Name of the extension')       
@@ -239,14 +192,14 @@ class SCubes:
             hdu.header['BUNIT'] = (f'{self.flam_unit}', 'Physical units of the array values')
         hdul.append(self._weights_mask_hdu())
         hdul.append(self._metadata_hdu(ext))
-        return hdul
+        return fits.HDUList(hdul)
 
     def write(self, cubepath, overwrite=False):
         print_level(f'writting cube {cubepath}', 1, self.verbose)
-        fits.HDUList(self.cube).writeto(cubepath, overwrite=overwrite)
+        self.cube.writeto(cubepath, overwrite=overwrite)
         print_level(f'Cube successfully created!', 1, self.verbose)    
 
-    def create_cube(self, flam_scale=None, objname=None, outpath=None, redo=False, data_ext=1, write_fits=False):
+    def create_cube(self, flam_scale=None, objname=None, outpath=None, force=False, data_ext=1, write_fits=False, return_scube=False):
         self.flam_scale = 1e-19 if flam_scale is None else flam_scale
         self.objname = 'myobj' if objname is None else objname
         self.outpath = '.' if outpath is None else outpath
@@ -259,69 +212,16 @@ class SCubes:
 
             self.cubepath = join(self.outpath, f'{self.objname}_cube.fits')
 
-            if exists(self.cubepath) and not redo:
+            if exists(self.cubepath) and not force:
                 raise OSError('SCube exists!')
 
-        self._download_calibrated_stamps(objname, outpath, force=redo)
+        self._download_calibrated_stamps(objname, outpath, force=force)
         self._photospectra(flam_scale, ext=data_ext)
 
         self.cube = self._create_cube_hdulist(objname, ext=data_ext)
 
         if (self.cubepath is not None) and write_fits:
-            self.write(self.cubepath, redo)
-           
-def scubes_argparse(args):
-    '''
-    A particular parser of the command-line arguments for `scubes` entry-point script.
-
-    Parameters
-    ----------
-    args : :class:`argparse.Namespace`
-        Command-line arguments parsed by :meth:`argparse.ArgumentParser.parse_args`
-
-    Returns
-    -------
-    :class:`argparse.Namespace`
-        Command-line arguments parsed.
-    '''
-    # closest even
-    args.size = round(args.size/2)*2
-    return args
-
-def scubes():
-    '''
-    Entry-point function for creating S-PLUS galaxy data cubes (S-CUBES).
-
-    Raises
-    ------
-    SystemExit
-        If SExtractor is not found.
-
-    Returns
-    -------
-    None
-    '''
-    from splusdata.scubes.core import SCubes
-
-    parser = create_parser(args_dict=SCUBES_ARGS, program_description=SCUBES_PROG_DESC)
-    # ADD VERSION OPTION
-    parser.add_argument('--version', action='version', version='%(prog)s {version}'.format(version=__script_version__))
-    args = scubes_argparse(parser.parse_args(args=sys.argv[1:]))
-
-    if args.verbose == 0:
-        # dactivate warnings without verbosity
-        import warnings
-        from astropy.wcs import FITSFixedWarning
-        from astropy.io.fits.verify import VerifyWarning
-
-        warnings.simplefilter('ignore', category=VerifyWarning)
-        warnings.simplefilter('ignore', category=FITSFixedWarning)
-
-    scube = SCubes(
-        ra=args.ra, dec=args.dec, field=args.field, 
-        size=args.size, username=args.username, password=args.password,
-        verbose=args.verbose,
-    )
-
-    outpath = join(args.workdir, args.object)
-    scube.create_cube(objname=args.object, outpath=outpath, redo=args.redo, data_ext=1, write_fits=True)
+            self.write(self.cubepath, force)
+        
+        if return_scube:
+            return read_scube(self.cube)
