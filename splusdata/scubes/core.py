@@ -23,14 +23,14 @@ def _getdata_array(pathlist, ext):
 def _getheader_array(pathlist, ext):
     return np.array([fits.getheader(img, ext=ext) for img in pathlist])
 
-def _getval_array_mem(hdull, key):
-    return np.array([hdul.header.get(key) for hdul in hdull])
+def _getval_array_mem(hdull, key, ext):
+    return np.array([hdul[ext].header.get(key) for hdul in hdull])
 
-def _getdata_array_mem(hdull):
-    return np.array([hdul.data for hdul in hdull])
+def _getdata_array_mem(hdull, ext):
+    return np.array([hdul[ext].data for hdul in hdull])
 
-def _getheader_array_mem(hdull):
-    return np.array([hdul.header for hdul in hdull])
+def _getheader_array_mem(hdull, ext):
+    return np.array([hdul[ext].header for hdul in hdull])
 
 def _get_band_info_array(prop):
     return np.array([get_band_info(band)[prop] for band in BANDS])
@@ -48,13 +48,13 @@ class SCubes:
         self.size = size
 
     def _getval(self, obj, key, ext, mem=False):
-        return _getval_array_mem(obj, key) if mem else _getval_array(obj, key, ext)
+        return _getval_array_mem(obj, key, ext) if mem else _getval_array(obj, key, ext)
 
     def _getdata(self, obj, ext, mem=False):
-        return _getdata_array_mem(obj) if mem else _getdata_array(obj, ext)
+        return _getdata_array_mem(obj, ext) if mem else _getdata_array(obj, ext)
 
     def _getheader(self, obj, ext, mem=False):
-        return _getheader_array_mem(obj) if mem else _getheader_array(obj, ext)
+        return _getheader_array_mem(obj, ext) if mem else _getheader_array(obj, ext)
 
     def _download_calibrated_stamps(self, objname, outpath=None, force=False):
         images = []
@@ -79,7 +79,7 @@ class SCubes:
                 _ = self.conn.stamp(**kw_args)
                 wimages.append(kw_args['outfile'])
             else:
-                wimages.append(self.conn.stamp(**kw_args)[1])
+                wimages.append(self.conn.stamp(**kw_args))
         self.images = images
         self.wimages = wimages
 
@@ -104,8 +104,10 @@ class SCubes:
         gain__b = self._getval(self.images, 'GAIN', ext, mem=mem)
         gain__byx = gain__b[:, None, None]
         weidata__byx = np.abs(self._getdata(self.wimages, ext, mem=mem))
-        calib_data_err__byx = np.sqrt(1/weidata__byx + np.abs(calib_data__byx)/gain__byx)
-        efnu__byx = calib_data_err__byx*Jy2fnu*self.fnu_unit
+        zp_factor__byx = self._getdata(self.images, 2, mem=mem)
+        data__byx = np.abs(calib_data__byx/zp_factor__byx)
+        dataerr__byx = np.sqrt(1/weidata__byx + data__byx/gain__byx)
+        efnu__byx = dataerr__byx*zp_factor__byx*Jy2fnu*self.fnu_unit
         eflam__byx = scale*(efnu__byx*_c/self.wl__b[:, None, None]**2).to(self.flam_unit)
 
         self.flam__byx = flam__byx
@@ -158,7 +160,7 @@ class SCubes:
             if self.cubepath is not None:
                 hdr = fits.getheader(img, ext=ext)
             else:
-                hdr = img.header
+                hdr = img[ext].header
             key = [k for k in hdr.keys() if 'FWHMMEAN' in k]
             if len(key) == 1:
                 psffwhm__b.append(hdr.get(key[0]))
@@ -174,7 +176,7 @@ class SCubes:
         cube_prim_hdu.header['SIZE'] = (self.size, 'Side of the stamp in pixels')
         cube_prim_hdu.header['RA'] = self.ra
         cube_prim_hdu.header['DEC'] = self.dec
-        hdr = self.images[0].header if self.cubepath is None else fits.getheader(self.images[0], ext=1)
+        hdr = self.images[0][ext].header if self.cubepath is None else fits.getheader(self.images[0], ext=ext)
         cube_prim_hdu.header.update(self._stamp_WCS_to_cube_header(hdr))
         for key in ['X0TILE', 'X01TILE', 'Y0TILE', 'Y01TILE']:
             cube_prim_hdu.header[key] = hdr.get(key)

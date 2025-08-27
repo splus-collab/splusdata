@@ -21,7 +21,7 @@ SCUBES_PROG_DESC = f'''
    {__script_author__}
 
 The input values of RA and DEC will be converted to degrees using the 
-scubes.utilities.io.convert_coord_to_degrees(). All scripts with RA 
+splusdata.features.io.convert_coord_to_degrees(). All scripts with RA 
 and DEC inputs parse angles in two different units:
 
 - **hourangle**: using *hms* divisors; Ex: *10h37m2.5s*
@@ -32,15 +32,18 @@ Note that *10h37m2.5s* is a totally different angle from *10:37:2.5*
 
 '''
 
+size_help = 'Size of the cube in pixels. '
+size_help += 'If size is a odd number, the program '
+size_help += 'will choose the closest even integer.'
+
 SCUBES_ARGS = {
     # optional arguments
     'force': ['f', dict(action='store_true', default=False, help='Force overwrite of existing files.')],
-    'size': ['l', dict(default=500, type=int, help='Size of the cube in pixels. If size is a odd number, the program will choose the closest even integer.')],
+    'size': ['l', dict(default=500, type=int, help=size_help)],
     'workdir': ['w', dict(default=getcwd(), help='Working directory.')],
     'verbose': ['v', dict(action='count', default=0, help='Verbosity level.')],
-    'username': ['U', dict(default=None, help='S-PLUS Cloud username.')],
-    'password': ['P', dict(default=None, help='S-PLUS Cloud password.')],
-     #'data_release': ['d', dict(default='dr4', type=str, help='Select S-PLUS Data Release')],
+    'username': ['U', dict(default=None, help='S-PLUS cloud username.')],
+    'password': ['P', dict(default=None, help='S-PLUS cloud password.')],
 
     # positional arguments
     'field': ['pos', dict(metavar='SPLUS_TILE', help='Name of the S-PLUS field')],
@@ -48,11 +51,10 @@ SCUBES_ARGS = {
     'dec': ['pos', dict(metavar='DEC', help="Object's declination")],
     'object': ['pos', dict(metavar='OBJECT_NAME', help="Object's name")],
 }
-
            
 def scubes_argparse(args):
     '''
-    A particular parser of the command-line arguments for `scubes` entry-point script.
+    A particular parser of the command-line arguments for `scubes` script.
 
     Parameters
     ----------
@@ -70,7 +72,7 @@ def scubes_argparse(args):
 
 def scubes():
     '''
-    Entry-point function for creating S-PLUS galaxy data cubes (S-CUBES).
+    Script function for creating S-PLUS galaxy data cubes (S-CUBES).
 
     Raises
     ------
@@ -104,4 +106,4 @@ def scubes():
     )
 
     outpath = join(args.workdir, args.object)
-    _ = creator.create_cube(objname=args.object, outpath=outpath, force=args.force, data_ext=1, write_fits=True)
+    creator.create_cube(objname=args.object, outpath=outpath, force=args.force, data_ext=1, write_fits=True, return_scube=False)

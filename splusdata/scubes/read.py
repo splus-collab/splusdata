@@ -32,7 +32,7 @@ def _parse_filters_tuple(f_tup, filters):
             i_f.append(f_tup)
     return i_f
 
-def make_RGB_tom(flux__lyx,
+def make_RGB_tom(flux__byx,
         rgb=(7, 5, 9), rgb_f=(1, 1, 1), 
         pminmax=(5, 95), im_max=255, 
         # astropy.visualization.make_lupton_rgb() input vars
@@ -50,7 +50,7 @@ def make_RGB_tom(flux__lyx,
                 i_f.append(f)
         else:
             i_f.append(f_tup)
-        C = copy(flux__lyx[i_f, :, :]).sum(axis=0)
+        C = copy(flux__byx[i_f, :, :]).sum(axis=0)
         # percentiles
         Cmin, Cmax = np.nanpercentile(C, pmin), np.nanpercentile(C, pmax)
         # calc color intensities
@@ -290,9 +290,9 @@ class read_scube:
         Computes the magnitude per square arcsecond and corresponding errors from the flux values.
         '''        
         a = 1/(2.997925e18*3631.0e-23*self.pixscale**2)
-        x = a*(self.flux__lyx*self.pivot_wave[:, np.newaxis, np.newaxis]**2)
-        self.mag_arcsec2__lyx = -2.5*np.log10(x)
-        self.emag_arcsec2__lyx = (2.5*np.log10(np.exp(1)))*self.eflux__lyx/self.flux__lyx
+        x = a*(self.flux__byx*self.pivot_wave[:, np.newaxis, np.newaxis]**2)
+        self.mag_arcsec2__byx = -2.5*np.log10(x)
+        self.emag_arcsec2__byx = (2.5*np.log10(np.exp(1)))*self.eflux__byx/self.flux__byx
 
     def _init(self):
         '''
@@ -303,6 +303,12 @@ class read_scube:
         self._init_centre()
         self._mag_values()
         self.pa, self.ba = 0, 1
+        self.set_ellipticity(self.pa, self.ba)
+        #self.pixel_distance__yx = get_image_distance(self.weimask__yx.shape, x0=self.x0, y0=self.y0, pa=self.pa, ba=self.ba)
+
+    def set_ellipticity(self, pa, ba):
+        self.pa = pa
+        self.ba = ba
         self.pixel_distance__yx = get_image_distance(self.weimask__yx.shape, x0=self.x0, y0=self.y0, pa=self.pa, ba=self.ba)
 
     def get_filter_i(self, filt):
@@ -364,13 +370,13 @@ class read_scube:
         i_rgb = [_parse_filters_tuple(x, self.filters) for x in rgb]
 
         return make_RGB_tom(
-            self.flux__lyx, rgb=i_rgb, rgb_f=rgb_f, 
+            self.flux__byx, rgb=i_rgb, rgb_f=rgb_f, 
             pminmax=pminmax, im_max=im_max, 
             minimum=minimum, Q=Q, stretch=stretch
         )
 
     @property
-    def weimask__lyx(self):
+    def weimask__byx(self):
         return np.broadcast_to(self.weimask__yx, (len(self.filters), self.size, self.size))
 
     @property
@@ -438,12 +444,12 @@ class read_scube:
         return self._hdulist['WEIMASK'].data
 
     @property 
-    def flux__lyx(self):
-        return self._hdulist['DATA'].data*self._hdulist['ERRORS'].header['BSCALE']
+    def flux__byx(self):
+        return self._hdulist['DATA'].data*self._hdulist['DATA'].header['BSCALE']
 
     @property 
-    def eflux__lyx(self):
-        return self._hdulist['ERRORS'].data*self._hdulist['ERRORS'].header['BSCALE']
+    def eflux__byx(self):
+        return self._hdulist['ERRORS'].data*self._hdulist['DATA'].header['BSCALE']
     
     @property
     def n_x(self):
@@ -458,13 +464,13 @@ class read_scube:
         return self.data_header['NAXIS3']
     
     @property
-    def SN__lyx(self):
-        return self.flux__lyx/self.eflux__lyx
+    def SN__byx(self):
+        return self.flux__byx/self.eflux__byx
 
     @property
-    def mag__lyx(self):
-        return self.mag_arcsec2__lyx
+    def mag__byx(self):
+        return self.mag_arcsec2__byx
 
     @property
-    def emag__lyx(self):
-        return self.emag_arcsec2__lyx
+    def emag__byx(self):
+        return self.emag_arcsec2__byx
