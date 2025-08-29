@@ -87,8 +87,6 @@ class SCubes:
         flam_scale = 1e-19 if flam_scale is None else flam_scale
         _c = const.c
         scale = (1/flam_scale)
-        #Jy to to erg/s/cm/cm/Hz
-        #Jy2fnu = - 2.5*(np.log10(3631) - 23)  # 48.5999343777177...
         Jy2fnu = 3631e-23
 
         self.wl__b = _get_band_info_array('pivot_wave')*u.Angstrom
@@ -97,22 +95,28 @@ class SCubes:
         self.fnu_unit = u.erg / u.s / u.cm / u.cm / u.Hz
 
         mem = True if self.cubepath is None else False
+
+        # flux
         calib_data__byx = self._getdata(self.images, ext, mem=mem)
         fnu__byx = calib_data__byx*Jy2fnu*self.fnu_unit
         flam__byx = scale*(fnu__byx*_c/self.wl__b[:, None, None]**2).to(self.flam_unit)
 
+        # error in flux
+        zp_factor__byx = self._getdata(self.images, 2, mem=mem)
+        absdata__byx = np.abs(calib_data__byx/zp_factor__byx)
         gain__b = self._getval(self.images, 'GAIN', ext, mem=mem)
         gain__byx = gain__b[:, None, None]
-        weidata__byx = np.abs(self._getdata(self.wimages, ext, mem=mem))
-        zp_factor__byx = self._getdata(self.images, 2, mem=mem)
-        data__byx = np.abs(calib_data__byx/zp_factor__byx)
-        dataerr__byx = np.sqrt(1/weidata__byx + data__byx/gain__byx)
-        efnu__byx = dataerr__byx*zp_factor__byx*Jy2fnu*self.fnu_unit
+        weidata__byx = self._getdata(self.wimages, ext, mem=mem)
+        absweidata__byx = np.abs(self._getdata(self.wimages, ext, mem=mem))
+        dataerr__byx = np.sqrt(1/absweidata__byx + absdata__byx/gain__byx)
+        f0__byx = zp_factor__byx*Jy2fnu
+        efnu__byx = dataerr__byx*f0__byx*self.fnu_unit
         eflam__byx = scale*(efnu__byx*_c/self.wl__b[:, None, None]**2).to(self.flam_unit)
 
         self.flam__byx = flam__byx
         self.eflam__byx = eflam__byx
         self.weidata__byx = weidata__byx
+        self.absweidata__byx = absweidata__byx
 
     def _stamp_WCS_to_cube_header(self, header):
         '''
