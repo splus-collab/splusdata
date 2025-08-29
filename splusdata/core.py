@@ -3,9 +3,11 @@ import getpass
 
 from PIL import Image
 from astropy.io import fits
+import astropy.units as u
 import io
 
 from splusdata.features.io import print_level
+from splusdata.features.find_pointings import find_pointing
 
 class SplusdataError(Exception):
     """Custom exception type for S-PLUS data errors raised by this helper module.
@@ -661,3 +663,26 @@ class Core:
         if outfile:
             stamp.writeto(outfile, overwrite=True)
         return stamp
+    
+    def check_coords(self, ra, dec, radius=1 * u.degree):
+        """Check which DR contains a pointing within `radius` of (ra, dec).
+
+        Parameters
+        ----------
+        ra, dec : float
+            Coordinates in degrees.
+        radius : Astropy unit, optional
+            Search radius in degrees (default 1 deg).
+
+        Returns
+        -------
+        dict or None
+            If found, a dict with keys 'dr', 'field', and 'distance' (an astropy
+            Quantity in degrees). If not found in any DR, returns None.
+
+        Raises
+        ------
+        Exception
+            Propagates any errors from `find_pointing`.
+        """
+        return find_pointing(ra, dec, radius=radius)

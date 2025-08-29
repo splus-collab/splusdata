@@ -1,6 +1,30 @@
 BANDS = ['u', 'J0378', 'J0395', 'J0410', 'J0430', 'g', 'J0515', 'r', 'J0660', 'i', 'J0861', 'z']
 WAVELENGHTS = [3536, 3770, 3940, 4094, 4292, 4751, 5133, 6258, 6614, 7690, 8611, 8831]
 
+DR_POINTINGS = {
+    "dr4": 
+        {
+            "link": "https://splus.cloud/files/documentation/iDR4/tabelas/iDR4_pointings.csv",
+            "ra_col": "RA", 
+            "dec_col": "DEC",
+            "field_col": "Field"
+        },
+    "dr5": 
+        {
+            "link": "https://splus.cloud/files/documentation/idr5/auxiliary_tables/iDR5_pointings.csv",
+            "ra_col": "RA_d",
+            "dec_col": "DEC_d",
+            "field_col": "iDR5_Field_Name"
+        },
+    "dr6": 
+        {
+            "link": "https://splus.cloud/files/dr6_docs/dr6_list.csv",
+            "ra_col": "ra",
+            "dec_col": "dec",
+            "field_col": "field"
+        }
+}
+
 BANDWAVEINFO_COLS = ['central_wave','delta_wave','trapz_wave','trapz_width','mean_wave','mean_width','mean_1_wave','mean_1_width','pivot_wave','alambda_av']
 
 BANDWAVEINFO = {
